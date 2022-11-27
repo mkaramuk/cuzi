@@ -1,0 +1,6 @@
+[submodule "argv_lib"]
+	path = argv_lib
+	url = git@github.com:sayysf/argv_lib.git
+[submodule "template_vector"]
+	path = template_vector
+	url = git@github.com:sayysf/template_vector.git

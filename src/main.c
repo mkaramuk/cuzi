@@ -9,6 +9,10 @@
 #include <logging.h>
 #include <string.h>
 #include <errno.h>
+#include <argv_lib.h>
+#include <fcntl.h>
+#include <sys/poll.h>
+#include <tempv_lib.h>
 
 #define DEFAULT_IP "127.0.0.1"
 #define DEFAULT_PORT 2002
@@ -137,6 +141,13 @@ t_serverdata *init_server(t_args *args)
 	data->run = 0;
 	data->fd = sock_fd;
 
+	if(fcntl(sock_fd, F_SETFL, O_NONBLOCK) < 0) {
+		log_error("fcntl(): %s", strerror(errno));
+		destroy_server(data);
+		return (NULL);
+
+	}
+	
 	if (bind(sock_fd, (struct sockaddr *)data->addr, sizeof(*data->addr)) < 0) {
 		log_error("bind(): %s", strerror(errno));
 		destroy_server(data);
@@ -192,21 +203,24 @@ ssize_t send_to_client(t_client *client, char *data)
 	return (send(client->fd, data, strlen(data), 0));
 }
 
-void *client_stuff(void *p)
+ int client_stuff(void *p)
 {
 	t_client *client = p;
 
 	log_info("Sending welcome message...");
 	if (send_to_client(client, "Hello, world!\n") == -1) {
 		log_error("Message couldn't send. Connection terminating...");
-		destroy_client(client);
-		return (NULL);
+		return (-1);
 	}
 
 	while (1)
 	{
 		char str[2083];
 		ssize_t recieved = recv(client->fd, str, 2083, 0);
+		if (recieved == 0)
+			return (-1);
+		else if (recieved == -1)
+			return (0);
 		str[recieved - 2] = 0;
 		if (*str)
 			log_info("Recieved from [%s:%d]: %s", client->ip, client->port, str);
@@ -222,23 +236,84 @@ void *client_stuff(void *p)
 			}
 		}
 	}
-	destroy_client(client);
-	return (NULL);
+	return (0);
 }
+
+typedef struct pollfd pfd_t; 
+
+
+
+GENERATE_TEMP_VECTOR_HEADER(pfd_t, PFD)
+GENERATE_TEMP_VECTOR(pfd_t, PFD)
+
 
 int main(int argc, char **argv, char **env)
 {
 	t_args			*args 			= parse_arguments(argc, argv, env);
 	t_serverdata	*data 			= init_server(args);
+	argv_t			*clients;
+	pfd_t			pf;
+	t_client		*client;
+	int				stat;
+	PFDtempv_t		*pvec;
 
 	if (!data)
-		return (1);
-	
-	while (1) 
+		return (1);	
+	clients = argv_new(NULL, NULL);
+	printf("%ld\n", clients->len);
+	pf = (struct pollfd){0};
+	pf.fd = data->fd;
+	pf.events = POLLIN;
+	pvec = PFDtempv_new(NULL, 0, NULL);	
+	PFDtempv_push(pvec ,pf);
+	while(1)
 	{
-		t_client *client = accept_client(data);
-		pthread_create(&(client->th_id), NULL, client_stuff, client);
+		stat = poll(pvec->vector, pvec->len, -1);
+		if (stat < 0) {
+			dprintf(2, "poll error\n");
+			exit(1);
+		}
+		if (stat == 0) {
+			dprintf(2,"time out\n");
+			exit(1);
+		}
+		int i = 0;
+		while (i < (int)pvec->len)
+		{
+			pf = pvec->vector[i];
+			if (pf.revents == 0) {
+				++i;
+				continue;
+			}
+			if (pf.revents != POLLIN)
+			{
+					argv_del_one(clients, i - 1, (void (*)(void *))destroy_client); // 
+					PFDtempv_del_one(pvec, i, NULL);
+					continue;
+			}
+			if (pf.fd == data->fd)
+			{
+				client = accept_client(data); 
+				fcntl(client->fd, F_SETFL, O_NONBLOCK);
+				if (argv_push(clients, client) < 0)
+					continue;
+				printf("push odu\n");
+				pf = (struct pollfd){.fd = client->fd, .events = POLLIN};
+				PFDtempv_push(pvec, pf);
+				i++;
+				continue;	
+			}
+			else
+			{
+				if (-1 == client_stuff(clients->vector[i - 1])){
+					argv_del_one(clients, i - 1, (void (*)(void *))destroy_client);
+					PFDtempv_del_one(pvec, i, NULL);
+					--i;
+				}
+			}
+			++i;
+		}
 	}
-
+	
 	return (0);
 }
