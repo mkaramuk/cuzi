@@ -1,22 +1,23 @@
-SRC		= src/main.c src/logging.c
-OBJ		= $(SRC:.c=.o)
-CC		= gcc
-CFLAGS	= -Wall -Wextra -Werror -I./includes -g
-LFLAGS	= -lpthread
-NAME	= server
+SRC		= $(shell find src -type f -name "*.c")
+OBJ		= $(SRC:src/%.c=objs/%.o)
+
 EXLIB  = ./argv_lib/argv.a
 EXLIBDIR = ./argv_lib
-
 EXLIBDIR2 = ./template_vector
 
+NAME	= cuzi-server
+CC		= gcc
+LFLAGS	= 
+CFLAGS	= -Wall -Wextra -Werror -I./includes -I$(EXLIBDIR2) -I$(EXLIBDIR) -g
 
 all: $(EXLIB) $(NAME)
 
-.c.o:
-	$(CC) $(CFLAGS) -I$(EXLIBDIR2) -I$(EXLIBDIR) -c $< -o $@
+objs/%.o: src/%.c
+	@mkdir -p $(shell dirname $@)
+	$(CC) $(CFLAGS) -c $< -o $@
 
 $(NAME): $(OBJ)
-	$(CC) -I$(EXLIBDIR2) -I$(EXLIBDIR) $(LFLAGS) $(OBJ) $(EXLIB)   -o $(NAME) 
+	$(CC) $(LFLAGS) $(OBJ) $(EXLIB) -o $(NAME) 
 
 $(EXLIB):
 	make -C ./argv_lib
