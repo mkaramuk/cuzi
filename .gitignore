@@ -1,2 +1,6 @@
 cuzi-rust/target
 cuzi-rust/Cargo.lock
+objs
+.vscode
+.idea
+cuzi-server
