@@ -10,8 +10,10 @@
 #include <fcntl.h>
 #include <sys/poll.h>
 
+#include "io.h"
 #include "argv_lib.h"
 #include "logging.h"
+#include "httpparser.h"
 #include "tempv_lib.h"
 #include "server.h"
 #include "environment.h"
@@ -24,17 +26,38 @@ GENERATE_TEMP_VECTOR(pfd_t, PFD)
 
 int main(int argc, char **argv, char **env)
 {
-	t_arguments		*args 			= parse_arguments(argc, argv, env);
-	t_serverdata	*data 			= init_server(args);
-	argv_t			*clients;
-	pfd_t			pf;
+	t_serverdata	*data	= init_server(parse_arguments(argc, argv, env));
 	t_client		*client;
-	int				stat;
-	PFDtempv_t		*pvec;
 
 	if (!data)
-		return (1);	
-	clients = argv_new(NULL, NULL);
+		return (1);
+
+
+
+	while (1)
+	{
+		if ((client = accept_client(data)))
+		{
+			char buf[1024];
+			int count = read(client->fd, buf, 1024);
+			if (count > 0)
+			{
+				buf[count] = 0;
+				t_httpresponse *response = calloc(sizeof(*response), 1);
+				response->content = "<html><head><meta charset=\"UTF-8\"><title>cuzi-server</title></head><body>Merhaba Dünya!</body></html>";
+				response->connection = "Closed";
+				response->contentType = "text/html";
+				response->code = HTTP_CODE_OK;
+				response->version = HTTP_VER_1_0;
+				response->contentLength = 0;
+				http_send_response(client, response);
+				free(response);
+			}
+		}
+	}
+
+	destroy_server(data);
+	/* clients = argv_new(NULL, NULL);
 	printf("%ld\n", clients->len);
 	pf = (struct pollfd){0};
 	pf.fd = data->fd;
@@ -46,10 +69,6 @@ int main(int argc, char **argv, char **env)
 		stat = poll(pvec->vector, pvec->len, -1);
 		if (stat < 0) {
 			dprintf(2, "poll error\n");
-			exit(1);
-		}
-		if (stat == 0) {
-			dprintf(2,"time out\n");
 			exit(1);
 		}
 		int i = 0;
@@ -88,7 +107,7 @@ int main(int argc, char **argv, char **env)
 			}
 			++i;
 		}
-	}
+	} */
 	
 	return (0);
 }

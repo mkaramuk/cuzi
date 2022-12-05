@@ -4,8 +4,12 @@
 
 void destroy_client(t_client *client)
 {
-	free(client->addr);
-	free(client->ip);
-	close(client->fd);
-	free(client);
+	if (client)
+	{
+		if (client->fd > 0)
+			close(client->fd);
+		free(client->addr);
+		free(client->ip);
+		free(client);
+	}
 }

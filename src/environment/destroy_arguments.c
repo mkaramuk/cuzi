@@ -4,6 +4,9 @@
 
 void destroy_arguments(t_arguments *args)
 {
-	free(args->ip);
-	free(args);
+	if (args)
+	{
+		free(args->ip);
+		free(args);
+	}
 }

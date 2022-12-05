@@ -19,9 +19,11 @@ t_serverdata *init_server(t_arguments *args)
 	if (sock_fd < 0)
 	{
 		fprintf(stderr, "Socket couldn't created\n");
+		free(data);
+		free(server_addr);
 		return (NULL);
 	}
-	log_info("Socket descriptor created %d", sock_fd);
+	log_info("Socket descriptor created for server: %d", sock_fd);
 
 	int opt = 1;
 	setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
@@ -36,14 +38,14 @@ t_serverdata *init_server(t_arguments *args)
 	data->run = 0;
 	data->fd = sock_fd;
 
-	if(fcntl(sock_fd, F_SETFL, O_NONBLOCK) < 0) {
+	/* if(fcntl(data->fd, F_SETFL, O_NONBLOCK) < 0) {
 		log_error("fcntl(): %s", strerror(errno));
 		destroy_server(data);
 		return (NULL);
 
-	}
+	} */
 	
-	if (bind(sock_fd, (struct sockaddr *)data->addr, sizeof(*data->addr)) < 0) {
+	if (bind(data->fd, (struct sockaddr *)data->addr, sizeof(*data->addr)) < 0) {
 		log_error("bind(): %s", strerror(errno));
 		destroy_server(data);
 		return (NULL);
