@@ -1,0 +1,10 @@
+{
+	"port": 2000,
+	"proxies": [
+		{
+			"path": "/",
+			"target": "example.com",
+			"target_port": 80
+		}
+	]
+}
