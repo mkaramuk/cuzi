@@ -104,6 +104,7 @@ dependencies = [
  "anyhow",
  "colored",
  "httparse",
+ "log",
  "mio",
  "pretty_env_logger",
  "serde",
