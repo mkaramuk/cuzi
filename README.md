@@ -1,6 +1,6 @@
 # Cuzi
 
-Cuzi (pronounced _ghu-zii_), which means _little_ in Turkish, is an educational project aimed at learn HTTP/HTTPS protocols using the popular programming language Rust.
+Cuzi (pronounced _ghu-zii_, which means _little_ in Turkish), is an educational project aimed at learn HTTP/HTTPS protocols using the popular programming language Rust.
 
 ## Build
 
