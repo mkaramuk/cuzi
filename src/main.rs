@@ -1,13 +1,17 @@
 mod config;
+mod http;
+mod types;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use config::{Config, ProxyConfig};
-use log::{debug, error, info};
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use http::{HTTPObject, HTTPReadState};
+use log::{error, info};
+use std::{net::SocketAddr, sync::Arc};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, ReadHalf, WriteHalf},
+    io::{AsyncWriteExt, BufReader, WriteHalf},
     net::{TcpListener, TcpStream},
 };
+use types::ReadHalfBuf;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -17,7 +21,7 @@ async fn main() -> Result<()> {
 
     pretty_env_logger::init();
 
-    info!("welcome to cuzi :)");
+    info!("Welcome to cuzi :)");
 
     let config = config::read_config_file().await?;
     let config = Arc::new(config);
@@ -43,34 +47,37 @@ async fn handler(
     mut from: ReadHalfBuf,
     mut to: WriteHalf<TcpStream>,
     proxy_info: &ProxyConfig,
+    mut obj: HTTPObject,
     name: &str,
 ) -> Result<()> {
-    // bail!("xd");
-    debug!("{} {} opened", proxy_info.path, name);
-
     loop {
-        let mut buffer = [0; 1024];
-        let read = from.read(&mut buffer).await?;
-
-        debug!(
-            "{} {} read {} bytes: {:?}",
-            proxy_info.path,
-            name,
-            read,
-            String::from_utf8(buffer[..read].to_vec()).unwrap_or("<binary>".to_string())
-        );
-
-        if read == 0 {
-            break;
+        if obj.state == HTTPReadState::Info {
+            obj.read_info(&mut from).await?;
+        }
+        if name == "client" {
+            to.write_all(format!("{} {} HTTP/1.1\r\n", obj.method, obj.uri).as_bytes())
+                .await?;
+        } else {
+            to.write_all(format!("HTTP/1.1 {} {}\r\n", obj.status_code, obj.status).as_bytes())
+                .await?;
         }
 
-        to.write_all(&buffer[..read]).await?;
+        obj.read_headers(&mut from).await?;
 
-        debug!("{} {} wrote {} bytes", proxy_info.path, name, read);
+        if name == "client" {
+            if let Some(x) = obj.get_header_mul("host") {
+                *x = proxy_info.target.clone();
+            }
+        }
+
+        for (header, value) in &obj.headers {
+            to.write_all(format!("{}: {}\r\n", header, value).as_bytes())
+                .await?;
+        }
+        to.write_all(b"\r\n").await?;
+        obj.read_body(&mut from).await?;
+        to.write_all(&obj.body).await?;
     }
-
-    info!("{} {} closed", proxy_info.path, name);
-    Ok(())
 }
 
 fn find_proxy<'a>(path: &str, config: &'a Config) -> Option<&'a ProxyConfig> {
@@ -83,113 +90,51 @@ fn find_proxy<'a>(path: &str, config: &'a Config) -> Option<&'a ProxyConfig> {
     return None;
 }
 
-type ReadHalfBuf = BufReader<ReadHalf<TcpStream>>;
-
-struct Headers {
-    method: String,
-    uri: String,
-    headers: HashMap<String, String>,
-}
-
-async fn read_headers(buf: &mut ReadHalfBuf) -> Result<Headers> {
-    let mut line = String::new();
-
-    debug!("Reading headers");
-
-    buf.read_line(&mut line).await?;
-
-    debug!("Header: {:?}", line);
-
-    let (method, uri, _version) =
-        if let [method, uri, version] = line.split(' ').collect::<Vec<_>>().as_slice() {
-            (method.to_string(), uri.to_string(), version.to_string())
-        } else {
-            bail!("Wrong number of elements in first line");
-        };
-
-    let mut headers = HashMap::new();
-
-    loop {
-        line.clear();
-        if buf.read_line(&mut line).await? == 0 {
-            break;
-        }
-
-        debug!("Header: {:?}", line);
-
-        if line == "\r\n" {
-            break;
-        }
-
-        let index = line.find(':').context("No : found in header")?;
-
-        let (key, value) = line.split_at(index);
-
-        headers.insert(key.to_string(), value.to_string());
-    }
-
-    debug!("Headers OK");
-
-    Ok(Headers {
-        method,
-        uri,
-        headers,
-    })
-}
-
-async fn write_headers_to_server(headers: &Headers, buf: &mut WriteHalf<TcpStream>) -> Result<()> {
-    buf.write_all(format!("{} {} HTTP/1.1\r\n", headers.method, headers.uri).as_bytes())
-        .await?;
-
-    for (key, value) in &headers.headers {
-        buf.write_all(format!("{}: {}\r\n", key, value).as_bytes())
-            .await?;
-    }
-
-    buf.write_all("\r\n".as_bytes()).await?;
-
-    Ok(())
-}
-
 async fn handle_client(stream: TcpStream, addr: SocketAddr, config: Arc<Config>) -> Result<()> {
     info!("Client connected from {}:{}", addr.ip(), addr.port());
 
-    let (stream_read, stream_write) = tokio::io::split(stream);
+    let (client_read, client_write) = tokio::io::split(stream);
+    let mut client_read_buf = BufReader::new(client_read);
+    let mut request = HTTPObject::new();
 
-    let mut stream_read_buf = BufReader::new(stream_read);
-
-    // Read the headers
-    let headers = read_headers(&mut stream_read_buf).await?;
-
-    info!("Request is {} {}", headers.method, headers.uri);
+    request.read_info(&mut client_read_buf).await?;
 
     // Find which server to connect
-    let proxy_config = find_proxy(&headers.uri, &config)
-        .with_context(|| format!("No proxy matched {}", headers.uri))?;
-
-    debug!("Proxy config: {:?}", proxy_config);
-
+    let proxy_config = find_proxy(&request.uri, &config)
+        .with_context(|| format!("No proxy matched {}", request.uri))?;
     let server_address = format!("{}:{}", proxy_config.target, proxy_config.target_port);
 
-    debug!("Connecting to {server_address}");
+    info!(
+        "Proxy {} {} {}",
+        request.method, request.uri, server_address
+    );
 
-    // Connect to server
     let server_stream = TcpStream::connect(server_address).await?;
-
-    debug!("Connected to server");
-
-    let (server_read, mut server_write) = tokio::io::split(server_stream);
+    let (server_read, server_write) = tokio::io::split(server_stream);
     let server_read_buf = BufReader::new(server_read);
-
     // modify headers
 
-    // send headers to server
-
-    write_headers_to_server(&headers, &mut server_write).await?;
-
     tokio::try_join!(
-        async move { handler(stream_read_buf, server_write, proxy_config, "<").await },
-        async move { handler(server_read_buf, stream_write, proxy_config, ">").await }
+        async move {
+            handler(
+                client_read_buf,
+                server_write,
+                proxy_config,
+                request,
+                "client",
+            )
+            .await
+        },
+        async move {
+            handler(
+                server_read_buf,
+                client_write,
+                proxy_config,
+                HTTPObject::new(),
+                "server",
+            )
+            .await
+        }
     )?;
 
     Ok(())

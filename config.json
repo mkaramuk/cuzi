@@ -3,8 +3,8 @@
 	"proxies": [
 		{
 			"path": "/",
-			"target": "example.com",
-			"target_port": 80
+			"target": "localhost",
+			"target_port": 3000
 		}
 	]
 }
