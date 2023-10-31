@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use anyhow::{bail, Context, Result};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite};
 
 use crate::types::ReadHalfBuf;
 
@@ -86,7 +86,10 @@ impl HTTPObject {
     }
 
     /// Reads the first line of the HTTP request/response and parses it.
-    pub async fn read_info(&mut self, buf: &mut ReadHalfBuf) -> Result<()> {
+    pub async fn read_info<T>(&mut self, buf: &mut ReadHalfBuf<T>) -> Result<()>
+    where
+        T: AsyncWrite + AsyncRead,
+    {
         let mut line = String::new();
         if buf.read_line(&mut line).await? == 0 {
             bail!("Connection closed");
@@ -103,7 +106,13 @@ impl HTTPObject {
     }
 
     /// Parses a header line and returns it.
-    pub async fn read_header(&mut self, buf: &mut ReadHalfBuf) -> Result<Option<(String, String)>> {
+    pub async fn read_header<T>(
+        &mut self,
+        buf: &mut ReadHalfBuf<T>,
+    ) -> Result<Option<(String, String)>>
+    where
+        T: AsyncWrite + AsyncRead,
+    {
         let mut line = String::new();
         if buf.read_line(&mut line).await? == 0 {
             return Ok(None);
@@ -135,7 +144,10 @@ impl HTTPObject {
     }
 
     /// Reads all headers.
-    pub async fn read_headers(&mut self, buf: &mut ReadHalfBuf) -> Result<()> {
+    pub async fn read_headers<T>(&mut self, buf: &mut ReadHalfBuf<T>) -> Result<()>
+    where
+        T: AsyncWrite + AsyncRead,
+    {
         if self.state != HTTPReadState::Headers {
             bail!("Object not at the headers state.");
         }
@@ -179,7 +191,10 @@ impl HTTPObject {
     }
 
     /// Reads the body of the HTTP request/response.
-    pub async fn read_body(&mut self, buf: &mut ReadHalfBuf) -> Result<()> {
+    pub async fn read_body<T>(&mut self, buf: &mut ReadHalfBuf<T>) -> Result<()>
+    where
+        T: AsyncWrite + AsyncRead,
+    {
         if self.state != HTTPReadState::Body {
             bail!("Object not at the body state.");
         }

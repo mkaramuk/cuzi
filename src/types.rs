@@ -1,6 +1,3 @@
-use tokio::{
-    io::{BufReader, ReadHalf},
-    net::TcpStream,
-};
+use tokio::io::{BufReader, ReadHalf};
 
-pub type ReadHalfBuf = BufReader<ReadHalf<TcpStream>>;
+pub type ReadHalfBuf<T> = BufReader<ReadHalf<T>>;
